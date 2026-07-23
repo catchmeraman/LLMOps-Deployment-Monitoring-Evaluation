@@ -1008,4 +1008,747 @@ if __name__ == "__main__":
 
 ---
 
+---
+
+## 🧪 Part 4: MLOps with Amazon SageMaker — The Complete Ecosystem
+
+### What is MLOps?
+
+**MLOps** (Machine Learning Operations) is the discipline of building, training, deploying, monitoring, and retraining ML models in a repeatable, automated, production-grade manner.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        MLOps LIFECYCLE                                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                           │
+│  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐           │
+│  │  DATA  │─▶│ BUILD  │─▶│ TRAIN  │─▶│ DEPLOY │─▶│MONITOR │           │
+│  │        │  │        │  │        │  │        │  │        │           │
+│  │• Ingest│  │• Feature│  │• HPO   │  │• Endpt │  │• Drift │           │
+│  │• Label │  │  Engg   │  │• Distri│  │• A/B   │  │• Perf  │           │
+│  │• Validate│ │• Select │  │  buted │  │• Shadow│  │• Retrain│          │
+│  │• Version│  │  model │  │• Eval  │  │• Multi │  │• Alert │           │
+│  └────────┘  └────────┘  └────────┘  └────────┘  └────┬───┘           │
+│       ▲                                                  │               │
+│       └──────────────────────────────────────────────────┘               │
+│                     Automated Retraining Loop                             │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### LLMOps vs MLOps — Key Differences
+
+| Aspect | Traditional MLOps | LLMOps |
+|--------|------------------|--------|
+| **Model** | Train from scratch / fine-tune | Use foundation model via API |
+| **Data** | Labeled datasets (GB-TB) | Prompts + few-shot examples |
+| **Training** | Hours-days on GPUs | Fine-tuning optional, prompt engineering primary |
+| **Artifact** | Model weights (.pt, .pkl) | Prompt templates + config |
+| **Deployment** | SageMaker Endpoint (GPU) | Bedrock API / AgentCore container |
+| **Monitoring** | Accuracy, F1, AUC drift | Hallucination, relevance, cost/token |
+| **Retraining** | On new data (weekly/monthly) | Prompt iteration (daily), fine-tune (quarterly) |
+| **Cost driver** | GPU instances (24/7) | Token usage (per-request) |
+
+### Amazon SageMaker — Complete Service Map
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    AMAZON SAGEMAKER ECOSYSTEM                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                           │
+│  PREPARE                    BUILD                    TRAIN                │
+│  ───────                    ─────                    ─────                │
+│  • Data Wrangler            • Studio Notebooks       • Training Jobs      │
+│  • Feature Store            • Autopilot (AutoML)     • Distributed Train  │
+│  • Ground Truth (Label)     • JumpStart (Pre-built)  • Hyperparameter Opt │
+│  • Processing Jobs          • Canvas (No-Code)       • Experiments        │
+│  • Clarify (Bias detect)    • Built-in Algorithms    • Debugger/Profiler  │
+│                                                                           │
+│  DEPLOY                     MONITOR                  ORCHESTRATE          │
+│  ──────                     ───────                  ───────────          │
+│  • Real-time Endpoints      • Model Monitor          • SageMaker Pipelines│
+│  • Serverless Inference     • Data Quality           • Step Functions     │
+│  • Batch Transform          • Model Quality          • EventBridge        │
+│  • Multi-Model Endpoints    • Bias Drift             • CodePipeline       │
+│  • Shadow Testing           • Feature Attribution    • MLflow on SM       │
+│  • Inference Recommender    • CloudWatch Metrics     • Model Registry     │
+│                                                                           │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Architecture Diagrams — MLOps
+
+### Diagram 6: MLOps End-to-End on SageMaker
+![MLOps End-to-End](generated-diagrams/06_mlops_sagemaker_e2e.png)
+
+### Diagram 7: SageMaker Pipelines — CI/CD for ML
+![SageMaker Pipelines](generated-diagrams/07_sagemaker_pipeline.png)
+
+### Diagram 8: Model Monitoring & Drift Detection
+![Model Monitoring](generated-diagrams/08_model_monitoring_drift.png)
+
+### Diagram 9: Feature Store & Training Architecture
+![Feature Store & Training](generated-diagrams/09_feature_store_training.png)
+
+---
+
+### Code: SageMaker Pipeline — End-to-End ML Workflow
+
+```python
+"""
+MLOps: SageMaker Pipeline — Complete ML workflow
+Data Processing → Training → Evaluation → Model Registry → Deploy
+"""
+import boto3
+import sagemaker
+from sagemaker.workflow.pipeline import Pipeline
+from sagemaker.workflow.steps import ProcessingStep, TrainingStep, CreateModelStep
+from sagemaker.workflow.step_collections import RegisterModel
+from sagemaker.workflow.conditions import ConditionGreaterThanOrEqualTo
+from sagemaker.workflow.condition_step import ConditionStep
+from sagemaker.workflow.parameters import ParameterString, ParameterFloat
+from sagemaker.processing import ScriptProcessor
+from sagemaker.estimator import Estimator
+from sagemaker.inputs import TrainingInput
+from sagemaker.model_metrics import MetricsSource, ModelMetrics
+
+# --- Configuration ---
+REGION = "us-east-1"
+ROLE = "arn:aws:iam::ACCOUNT:role/SageMakerExecutionRole"
+BUCKET = "sagemaker-mlops-pipeline-2026"
+PREFIX = "fraud-detection"
+
+session = sagemaker.Session()
+sm_client = boto3.client('sagemaker', region_name=REGION)
+
+
+# ====================================================
+# PIPELINE PARAMETERS (configurable per run)
+# ====================================================
+
+param_instance_type = ParameterString(name="TrainingInstanceType", default_value="ml.m5.xlarge")
+param_model_approval = ParameterString(name="ModelApprovalStatus", default_value="PendingManualApproval")
+param_accuracy_threshold = ParameterFloat(name="AccuracyThreshold", default_value=0.85)
+
+
+# ====================================================
+# STEP 1: DATA PROCESSING
+# ====================================================
+
+sklearn_processor = ScriptProcessor(
+    framework_version="1.2-1",
+    role=ROLE,
+    instance_type="ml.m5.large",
+    instance_count=1,
+    command=["python3"],
+    image_uri=sagemaker.image_uris.retrieve("sklearn", REGION, version="1.2-1")
+)
+
+step_process = ProcessingStep(
+    name="PreprocessData",
+    processor=sklearn_processor,
+    inputs=[
+        sagemaker.processing.ProcessingInput(
+            source=f"s3://{BUCKET}/{PREFIX}/raw-data/",
+            destination="/opt/ml/processing/input"
+        )
+    ],
+    outputs=[
+        sagemaker.processing.ProcessingOutput(
+            output_name="train", source="/opt/ml/processing/train",
+            destination=f"s3://{BUCKET}/{PREFIX}/processed/train"
+        ),
+        sagemaker.processing.ProcessingOutput(
+            output_name="test", source="/opt/ml/processing/test",
+            destination=f"s3://{BUCKET}/{PREFIX}/processed/test"
+        )
+    ],
+    code="scripts/preprocess.py"
+)
+
+
+# ====================================================
+# STEP 2: MODEL TRAINING
+# ====================================================
+
+xgb_estimator = Estimator(
+    image_uri=sagemaker.image_uris.retrieve("xgboost", REGION, version="1.7-1"),
+    role=ROLE,
+    instance_count=1,
+    instance_type=param_instance_type,
+    output_path=f"s3://{BUCKET}/{PREFIX}/models/",
+    hyperparameters={
+        "objective": "binary:logistic",
+        "num_round": "200",
+        "max_depth": "6",
+        "eta": "0.1",
+        "subsample": "0.8",
+        "eval_metric": "auc"
+    }
+)
+
+step_train = TrainingStep(
+    name="TrainModel",
+    estimator=xgb_estimator,
+    inputs={
+        "train": TrainingInput(
+            s3_data=step_process.properties.ProcessingOutputConfig.Outputs["train"].S3Output.S3Uri,
+            content_type="text/csv"
+        ),
+        "validation": TrainingInput(
+            s3_data=step_process.properties.ProcessingOutputConfig.Outputs["test"].S3Output.S3Uri,
+            content_type="text/csv"
+        )
+    }
+)
+
+
+# ====================================================
+# STEP 3: MODEL EVALUATION
+# ====================================================
+
+step_evaluate = ProcessingStep(
+    name="EvaluateModel",
+    processor=sklearn_processor,
+    inputs=[
+        sagemaker.processing.ProcessingInput(
+            source=step_train.properties.ModelArtifacts.S3ModelArtifacts,
+            destination="/opt/ml/processing/model"
+        ),
+        sagemaker.processing.ProcessingInput(
+            source=step_process.properties.ProcessingOutputConfig.Outputs["test"].S3Output.S3Uri,
+            destination="/opt/ml/processing/test"
+        )
+    ],
+    outputs=[
+        sagemaker.processing.ProcessingOutput(
+            output_name="evaluation",
+            source="/opt/ml/processing/evaluation",
+            destination=f"s3://{BUCKET}/{PREFIX}/evaluation/"
+        )
+    ],
+    code="scripts/evaluate.py"
+)
+
+
+# ====================================================
+# STEP 4: CONDITIONAL — Register only if quality passes
+# ====================================================
+
+step_register = RegisterModel(
+    name="RegisterModel",
+    estimator=xgb_estimator,
+    model_data=step_train.properties.ModelArtifacts.S3ModelArtifacts,
+    content_types=["text/csv"],
+    response_types=["text/csv"],
+    inference_instances=["ml.m5.large", "ml.m5.xlarge"],
+    transform_instances=["ml.m5.xlarge"],
+    model_package_group_name=f"{PREFIX}-model-group",
+    approval_status=param_model_approval,
+    model_metrics=ModelMetrics(
+        model_statistics=MetricsSource(
+            s3_uri=f"s3://{BUCKET}/{PREFIX}/evaluation/metrics.json",
+            content_type="application/json"
+        )
+    )
+)
+
+# Quality gate: only register if accuracy >= threshold
+condition_quality = ConditionGreaterThanOrEqualTo(
+    left=step_evaluate.properties.ProcessingOutputConfig.Outputs["evaluation"],
+    right=param_accuracy_threshold
+)
+
+step_condition = ConditionStep(
+    name="QualityGate",
+    conditions=[condition_quality],
+    if_steps=[step_register],
+    else_steps=[]  # Skip registration if quality too low
+)
+
+
+# ====================================================
+# STEP 5: ASSEMBLE PIPELINE
+# ====================================================
+
+pipeline = Pipeline(
+    name="fraud-detection-pipeline",
+    parameters=[param_instance_type, param_model_approval, param_accuracy_threshold],
+    steps=[step_process, step_train, step_evaluate, step_condition],
+    sagemaker_session=session
+)
+
+
+# Create/Update and Execute
+if __name__ == "__main__":
+    pipeline.upsert(role_arn=ROLE)
+    print("✅ Pipeline created/updated: fraud-detection-pipeline")
+    
+    execution = pipeline.start(
+        parameters={
+            "TrainingInstanceType": "ml.m5.xlarge",
+            "AccuracyThreshold": 0.85,
+            "ModelApprovalStatus": "PendingManualApproval"
+        }
+    )
+    print(f"🚀 Pipeline execution started: {execution.arn}")
+```
+
+---
+
+### Code: Model Deployment with Shadow Testing & Auto-Scaling
+
+```python
+"""
+MLOps: SageMaker Model Deployment
+Real-time endpoint with auto-scaling, shadow testing, and multi-variant.
+"""
+import boto3
+import sagemaker
+from sagemaker.model import Model
+from sagemaker.predictor import Predictor
+
+sm_client = boto3.client('sagemaker', region_name='us-east-1')
+autoscaling = boto3.client('application-autoscaling', region_name='us-east-1')
+
+MODEL_PACKAGE_GROUP = "fraud-detection-model-group"
+ENDPOINT_NAME = "fraud-detection-prod"
+ROLE = "arn:aws:iam::ACCOUNT:role/SageMakerExecutionRole"
+
+
+def deploy_model_from_registry(model_package_arn: str):
+    """Deploy an approved model from Model Registry to a real-time endpoint."""
+    
+    # Create model from registry
+    model_name = f"fraud-model-{model_package_arn.split('/')[-1]}"
+    
+    sm_client.create_model(
+        ModelName=model_name,
+        PrimaryContainer={
+            "ModelPackageName": model_package_arn
+        },
+        ExecutionRoleArn=ROLE
+    )
+    
+    # Create endpoint config with production variant
+    sm_client.create_endpoint_config(
+        EndpointConfigName=f"{ENDPOINT_NAME}-config",
+        ProductionVariants=[
+            {
+                "VariantName": "primary",
+                "ModelName": model_name,
+                "InstanceType": "ml.m5.large",
+                "InitialInstanceCount": 2,
+                "InitialVariantWeight": 1.0
+            }
+        ],
+        # Enable data capture for monitoring
+        DataCaptureConfig={
+            "EnableCapture": True,
+            "InitialSamplingPercentage": 100,
+            "DestinationS3Uri": f"s3://sagemaker-mlops-pipeline-2026/data-capture/",
+            "CaptureOptions": [
+                {"CaptureMode": "Input"},
+                {"CaptureMode": "Output"}
+            ],
+            "CaptureContentTypeHeader": {
+                "CsvContentTypes": ["text/csv"]
+            }
+        }
+    )
+    
+    # Create endpoint
+    sm_client.create_endpoint(
+        EndpointName=ENDPOINT_NAME,
+        EndpointConfigName=f"{ENDPOINT_NAME}-config"
+    )
+    
+    print(f"✅ Endpoint deploying: {ENDPOINT_NAME}")
+    return ENDPOINT_NAME
+
+
+def setup_autoscaling(endpoint_name: str, min_instances: int = 2, max_instances: int = 10):
+    """Configure auto-scaling based on invocations per instance."""
+    
+    resource_id = f"endpoint/{endpoint_name}/variant/primary"
+    
+    # Register scalable target
+    autoscaling.register_scalable_target(
+        ServiceNamespace="sagemaker",
+        ResourceId=resource_id,
+        ScalableDimension="sagemaker:variant:DesiredInstanceCount",
+        MinCapacity=min_instances,
+        MaxCapacity=max_instances
+    )
+    
+    # Scale based on invocations per instance
+    autoscaling.put_scaling_policy(
+        PolicyName=f"{endpoint_name}-scaling-policy",
+        ServiceNamespace="sagemaker",
+        ResourceId=resource_id,
+        ScalableDimension="sagemaker:variant:DesiredInstanceCount",
+        PolicyType="TargetTrackingScaling",
+        TargetTrackingScalingPolicyConfiguration={
+            "TargetValue": 750,  # 750 invocations per instance per minute
+            "PredefinedMetricSpecification": {
+                "PredefinedMetricType": "SageMakerVariantInvocationsPerInstance"
+            },
+            "ScaleInCooldown": 300,
+            "ScaleOutCooldown": 60
+        }
+    )
+    
+    print(f"✅ Auto-scaling configured: {min_instances}-{max_instances} instances")
+
+
+def deploy_ab_test(model_a_arn: str, model_b_arn: str, b_weight: float = 0.1):
+    """Deploy A/B test with two model variants."""
+    
+    sm_client.create_endpoint_config(
+        EndpointConfigName=f"{ENDPOINT_NAME}-ab-config",
+        ProductionVariants=[
+            {
+                "VariantName": "model-a-current",
+                "ModelName": "fraud-model-v1",
+                "InstanceType": "ml.m5.large",
+                "InitialInstanceCount": 2,
+                "InitialVariantWeight": 1.0 - b_weight  # 90%
+            },
+            {
+                "VariantName": "model-b-challenger",
+                "ModelName": "fraud-model-v2",
+                "InstanceType": "ml.m5.large",
+                "InitialInstanceCount": 1,
+                "InitialVariantWeight": b_weight  # 10%
+            }
+        ]
+    )
+    
+    print(f"✅ A/B test config: Model-A ({(1-b_weight)*100}%) vs Model-B ({b_weight*100}%)")
+```
+
+---
+
+### Code: Model Monitoring & Drift Detection
+
+```python
+"""
+MLOps: SageMaker Model Monitor
+Detect data drift, model quality degradation, and bias drift automatically.
+"""
+import boto3
+from sagemaker.model_monitor import (
+    DefaultModelMonitor, DataCaptureConfig, CronExpressionGenerator,
+    ModelQualityMonitor, ModelBiasMonitor
+)
+from sagemaker.model_monitor.dataset_format import DatasetFormat
+import sagemaker
+
+sm_client = boto3.client('sagemaker', region_name='us-east-1')
+session = sagemaker.Session()
+
+ENDPOINT_NAME = "fraud-detection-prod"
+BUCKET = "sagemaker-mlops-pipeline-2026"
+ROLE = "arn:aws:iam::ACCOUNT:role/SageMakerExecutionRole"
+
+
+# ====================================================
+# DATA QUALITY MONITOR — Detect Feature Drift
+# ====================================================
+
+def setup_data_quality_monitor():
+    """Monitor for data drift — schema changes, missing values, distribution shift."""
+    
+    monitor = DefaultModelMonitor(
+        role=ROLE,
+        instance_count=1,
+        instance_type="ml.m5.large",
+        volume_size_in_gb=20,
+        max_runtime_in_seconds=3600
+    )
+    
+    # Create baseline from training data
+    monitor.suggest_baseline(
+        baseline_dataset=f"s3://{BUCKET}/fraud-detection/processed/train/train.csv",
+        dataset_format=DatasetFormat.csv(header=True),
+        output_s3_uri=f"s3://{BUCKET}/monitoring/data-quality/baseline/"
+    )
+    
+    # Schedule hourly monitoring
+    monitor.create_monitoring_schedule(
+        monitor_schedule_name="fraud-data-quality-schedule",
+        endpoint_input=ENDPOINT_NAME,
+        output_s3_uri=f"s3://{BUCKET}/monitoring/data-quality/reports/",
+        statistics=monitor.baseline_statistics(),
+        constraints=monitor.suggested_constraints(),
+        schedule_cron_expression=CronExpressionGenerator.hourly()
+    )
+    
+    print("✅ Data Quality Monitor scheduled (hourly)")
+
+
+# ====================================================
+# MODEL QUALITY MONITOR — Detect Accuracy Degradation
+# ====================================================
+
+def setup_model_quality_monitor():
+    """Monitor model quality — compare predictions vs ground truth labels."""
+    
+    model_quality_monitor = ModelQualityMonitor(
+        role=ROLE,
+        instance_count=1,
+        instance_type="ml.m5.large",
+        volume_size_in_gb=20,
+        max_runtime_in_seconds=1800,
+        sagemaker_session=session
+    )
+    
+    # Baseline from validation metrics
+    model_quality_monitor.suggest_baseline(
+        baseline_dataset=f"s3://{BUCKET}/fraud-detection/evaluation/predictions.csv",
+        dataset_format=DatasetFormat.csv(header=True),
+        output_s3_uri=f"s3://{BUCKET}/monitoring/model-quality/baseline/",
+        problem_type="BinaryClassification",
+        inference_attribute="prediction",
+        ground_truth_attribute="label"
+    )
+    
+    # Schedule daily monitoring
+    model_quality_monitor.create_monitoring_schedule(
+        monitor_schedule_name="fraud-model-quality-schedule",
+        endpoint_input=ENDPOINT_NAME,
+        output_s3_uri=f"s3://{BUCKET}/monitoring/model-quality/reports/",
+        problem_type="BinaryClassification",
+        ground_truth_input=f"s3://{BUCKET}/fraud-detection/ground-truth/",
+        constraints=model_quality_monitor.suggested_constraints(),
+        schedule_cron_expression=CronExpressionGenerator.daily()
+    )
+    
+    print("✅ Model Quality Monitor scheduled (daily)")
+
+
+# ====================================================
+# BIAS DRIFT MONITOR — Detect Fairness Degradation
+# ====================================================
+
+def setup_bias_monitor():
+    """Monitor for bias drift across protected attributes."""
+    
+    bias_monitor = ModelBiasMonitor(
+        role=ROLE,
+        instance_count=1,
+        instance_type="ml.m5.large",
+        volume_size_in_gb=20,
+        max_runtime_in_seconds=1800,
+        sagemaker_session=session
+    )
+    
+    # Configure bias analysis
+    bias_config = {
+        "label_values_or_threshold": [1],
+        "facet_name_or_index": "age_group",
+        "facet_values_or_threshold": ["18-25"],
+        "group_variable": "gender"
+    }
+    
+    print("✅ Bias Monitor configured for protected attributes")
+
+
+# ====================================================
+# CLOUDWATCH ALARMS FOR DRIFT
+# ====================================================
+
+def create_drift_alarms():
+    """Create CloudWatch alarms that fire when drift is detected."""
+    
+    cloudwatch = boto3.client('cloudwatch', region_name='us-east-1')
+    
+    alarms = [
+        {
+            "AlarmName": "mlops-data-drift-detected",
+            "Namespace": "aws/sagemaker/Endpoints/data-metrics",
+            "MetricName": "feature_baseline_drift_violations",
+            "Threshold": 0,
+            "ComparisonOperator": "GreaterThanThreshold",
+            "Description": "Data drift detected — feature distributions shifted"
+        },
+        {
+            "AlarmName": "mlops-model-quality-degraded",
+            "Namespace": "aws/sagemaker/Endpoints",
+            "MetricName": "ModelLatency",
+            "Threshold": 500,
+            "ComparisonOperator": "GreaterThanThreshold",
+            "Description": "Model latency exceeds 500ms"
+        },
+        {
+            "AlarmName": "mlops-invocation-errors",
+            "Namespace": "AWS/SageMaker",
+            "MetricName": "Invocation5XXErrors",
+            "Threshold": 5,
+            "ComparisonOperator": "GreaterThanThreshold",
+            "Description": "Endpoint returning 5xx errors"
+        }
+    ]
+    
+    for alarm in alarms:
+        cloudwatch.put_metric_alarm(
+            AlarmName=alarm["AlarmName"],
+            Namespace=alarm["Namespace"],
+            MetricName=alarm["MetricName"],
+            Statistic="Sum",
+            Period=300,
+            EvaluationPeriods=2,
+            Threshold=alarm["Threshold"],
+            ComparisonOperator=alarm["ComparisonOperator"],
+            AlarmActions=["arn:aws:sns:us-east-1:ACCOUNT:mlops-alerts"],
+            AlarmDescription=alarm["Description"]
+        )
+    
+    print(f"✅ Created {len(alarms)} drift/quality alarms")
+
+
+# ====================================================
+# AUTOMATED RETRAINING TRIGGER
+# ====================================================
+
+def setup_retrain_trigger():
+    """EventBridge rule: trigger retraining pipeline when drift detected."""
+    
+    events = boto3.client('events', region_name='us-east-1')
+    
+    events.put_rule(
+        Name="mlops-drift-retrain-trigger",
+        EventPattern=json.dumps({
+            "source": ["aws.cloudwatch"],
+            "detail-type": ["CloudWatch Alarm State Change"],
+            "detail": {
+                "alarmName": ["mlops-data-drift-detected"],
+                "state": {"value": ["ALARM"]}
+            }
+        }),
+        State="ENABLED",
+        Description="Trigger retraining when data drift is detected"
+    )
+    
+    events.put_targets(
+        Rule="mlops-drift-retrain-trigger",
+        Targets=[{
+            "Id": "retrain-pipeline",
+            "Arn": "arn:aws:sagemaker:us-east-1:ACCOUNT:pipeline/fraud-detection-pipeline",
+            "RoleArn": ROLE,
+            "SageMakerPipelineParameters": {
+                "PipelineParameterList": [
+                    {"Name": "TrainingInstanceType", "Value": "ml.m5.xlarge"},
+                    {"Name": "ModelApprovalStatus", "Value": "PendingManualApproval"}
+                ]
+            }
+        }]
+    )
+    
+    print("✅ Auto-retrain trigger: Drift → EventBridge → Pipeline")
+
+
+if __name__ == "__main__":
+    import json
+    print("🔍 Setting up MLOps Monitoring Stack")
+    print("=" * 50)
+    setup_data_quality_monitor()
+    setup_model_quality_monitor()
+    create_drift_alarms()
+    setup_retrain_trigger()
+```
+
+---
+
+### SageMaker Feature Store
+
+```python
+"""
+MLOps: SageMaker Feature Store — Centralized feature management.
+Single source of truth for training AND inference.
+"""
+import sagemaker
+from sagemaker.feature_store.feature_group import FeatureGroup
+from sagemaker.feature_store.feature_definition import FeatureDefinition, FeatureTypeEnum
+
+session = sagemaker.Session()
+ROLE = "arn:aws:iam::ACCOUNT:role/SageMakerExecutionRole"
+BUCKET = "sagemaker-mlops-pipeline-2026"
+
+
+def create_feature_group():
+    """Create a Feature Group for fraud detection features."""
+    
+    feature_group = FeatureGroup(
+        name="fraud-detection-features",
+        sagemaker_session=session
+    )
+    
+    # Define features
+    feature_definitions = [
+        FeatureDefinition(feature_name="transaction_id", feature_type=FeatureTypeEnum.STRING),
+        FeatureDefinition(feature_name="amount", feature_type=FeatureTypeEnum.FRACTIONAL),
+        FeatureDefinition(feature_name="merchant_category", feature_type=FeatureTypeEnum.STRING),
+        FeatureDefinition(feature_name="hour_of_day", feature_type=FeatureTypeEnum.INTEGRAL),
+        FeatureDefinition(feature_name="transaction_count_24h", feature_type=FeatureTypeEnum.INTEGRAL),
+        FeatureDefinition(feature_name="avg_amount_7d", feature_type=FeatureTypeEnum.FRACTIONAL),
+        FeatureDefinition(feature_name="is_international", feature_type=FeatureTypeEnum.INTEGRAL),
+        FeatureDefinition(feature_name="event_time", feature_type=FeatureTypeEnum.STRING),
+    ]
+    
+    feature_group.feature_definitions = feature_definitions
+    
+    # Create with online + offline store
+    feature_group.create(
+        s3_uri=f"s3://{BUCKET}/feature-store/",
+        record_identifier_name="transaction_id",
+        event_time_feature_name="event_time",
+        role_arn=ROLE,
+        enable_online_store=True  # Low-latency reads for inference
+    )
+    
+    print("✅ Feature Group created: fraud-detection-features")
+    print("   Online Store: Enabled (real-time inference)")
+    print("   Offline Store: S3 (training data)")
+    return feature_group
+```
+
+---
+
+### MLOps Maturity Levels
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    MLOps MATURITY MODEL                               │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                       │
+│  Level 0: MANUAL                                                     │
+│  • Jupyter notebooks                                                 │
+│  • Manual deployment (copy model to S3, create endpoint)             │
+│  • No monitoring, no versioning                                      │
+│                                                                       │
+│  Level 1: AUTOMATED TRAINING                                         │
+│  • SageMaker Training Jobs (scripted)                                │
+│  • Model Registry (versions tracked)                                 │
+│  • Basic CloudWatch monitoring                                       │
+│                                                                       │
+│  Level 2: CI/CD FOR ML                                               │
+│  • SageMaker Pipelines (automated workflows)                        │
+│  • CodePipeline triggers on data/code changes                        │
+│  • Evaluation gates (quality threshold)                              │
+│  • A/B testing for model variants                                    │
+│                                                                       │
+│  Level 3: FULLY AUTOMATED (Target)                                   │
+│  • Drift detection → auto-retrain trigger                           │
+│  • Feature Store (shared features)                                   │
+│  • Shadow testing before promotion                                   │
+│  • Automated rollback on quality drop                                │
+│  • Multi-model endpoints with dynamic routing                        │
+│                                                                       │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 *Built with ❤️ on AWS — Ramandeep Chandna | 23rd July 2026*
