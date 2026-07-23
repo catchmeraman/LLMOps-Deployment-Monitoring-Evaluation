@@ -1,6 +1,6 @@
-# 🚀 LLMOps: Deployment, Monitoring & Evaluation of Large Language Models
+# 🚀 MLOps & LLMOps: Build, Train, Deploy, Monitor & Evaluate ML/LLM Applications
 
-### A Complete Guide to Operationalizing LLMs on AWS
+### A Complete Guide — From SageMaker Pipelines to Production LLMs on AWS
 
 **Date:** 23rd July 2026 | **Level:** 300 (Advanced)
 **Speaker:** Ramandeep Chandna
@@ -29,17 +29,47 @@
 
 ## 📋 What is LLMOps?
 
-**LLMOps** (Large Language Model Operations) is the practice of deploying, monitoring, evaluating, and managing LLM-based applications in production — reliably, securely, and cost-effectively.
+---
+
+## 📑 Table of Contents
+
+| # | Section | Covers |
+|---|---------|--------|
+| 1 | [What is MLOps & LLMOps?](#-what-is-llmops) | Definitions, lifecycle, differences |
+| 2 | [Architecture Diagrams](#️-architecture-diagrams) | 9 AWS architecture diagrams with icons |
+| 3 | [AWS Services Map](#️-llmops-on-aws--services-map) | Complete ecosystem of services |
+| 4 | [Part 1: LLM Deployment](#-part-1-deployment--getting-llms-to-production) | Patterns, Model Gateway, Prompt Registry, CI/CD |
+| 5 | [Part 2: LLM Monitoring](#-part-2-monitoring--what-to-track-in-production) | CloudWatch metrics, alarms, cost tracking |
+| 6 | [Part 3: LLM Evaluation](#-part-3-evaluation--is-your-llm-actually-good) | LLM-as-Judge, Bedrock Model Eval, CI/CD gates |
+| 7 | [Part 4: MLOps with SageMaker](#-part-4-mlops-with-amazon-sagemaker--the-complete-ecosystem) | Pipelines, Training, Feature Store, Model Registry |
+| 8 | [Model Deployment & A/B Testing](#code-model-deployment-with-shadow-testing--auto-scaling) | Endpoints, auto-scaling, shadow testing |
+| 9 | [Drift Detection & Auto-Retrain](#code-model-monitoring--drift-detection) | Model Monitor, data quality, bias, auto-retrain triggers |
+| 10 | [Best Practices](#-best-practices) | Cost, security, monitoring, evaluation |
+
+---
+
+## 📋 What is MLOps & LLMOps?
+
+**MLOps** (Machine Learning Operations) is the discipline of automating the ML lifecycle — data preparation, training, deployment, monitoring, and retraining — in a production-grade, repeatable manner.
+
+**LLMOps** (Large Language Model Operations) extends MLOps for LLM-based applications — managing prompts, foundation models, token costs, hallucination detection, and evaluation at scale.
 
 ```
-Traditional MLOps:                       LLMOps:
-─────────────────                       ───────
-• Train model                           • Select/fine-tune foundation model
+MLOps (Traditional ML):                 LLMOps (Foundation Models):
+───────────────────────                 ─────────────────────────
+• Collect & label data                  • Select foundation model (Claude/Nova)
+• Feature engineering                   • Prompt engineering & versioning
+• Train model (GPU hours-days)          • Fine-tune (optional, hours)
 • Package model artifact                • Manage prompts as code
-• Deploy to endpoint                    • Deploy via APIs or containers
-• Monitor accuracy metrics              • Monitor hallucinations, latency, cost
-• Retrain on new data                   • Evaluate with LLM-as-judge
-• A/B test model versions               • A/B test prompt versions + models
+• Deploy to SageMaker Endpoint          • Deploy via Bedrock API or AgentCore
+• Monitor accuracy/AUC drift            • Monitor hallucinations, latency, cost
+• Retrain on new labeled data           • Evaluate with LLM-as-judge
+• A/B test model versions               • A/B test prompt + model versions
+
+BOTH NEED:
+• CI/CD automation       • Version control       • Quality gates
+• Monitoring & alerting  • Cost management       • Security & compliance
+• Drift detection        • Automated rollback    • Observability
 ```
 
 ---
@@ -69,41 +99,66 @@ Traditional MLOps:                       LLMOps:
 
 ---
 
-## 🏗️ Architecture Diagrams
+## 🏗️ Architecture Diagrams (All 9)
 
-### Diagram 1: LLMOps — Complete Platform Architecture
+### LLMOps Diagrams
+
+#### Diagram 1: LLMOps — Complete Platform Architecture
 ![LLMOps Platform Architecture](generated-diagrams/01_llmops_platform.png)
 
-### Diagram 2: LLM Deployment Pipeline (CI/CD)
+#### Diagram 2: LLM Deployment Pipeline (CI/CD)
 ![LLM Deployment Pipeline](generated-diagrams/02_deployment_pipeline.png)
 
-### Diagram 3: LLM Monitoring & Observability Stack
+#### Diagram 3: LLM Monitoring & Observability Stack
 ![Monitoring & Observability](generated-diagrams/03_monitoring_stack.png)
 
-### Diagram 4: LLM Evaluation Framework
+#### Diagram 4: LLM Evaluation Framework
 ![Evaluation Framework](generated-diagrams/04_evaluation_framework.png)
 
-### Diagram 5: Model Gateway & Traffic Management
+#### Diagram 5: Model Gateway & Traffic Management
 ![Model Gateway](generated-diagrams/05_model_gateway.png)
+
+### MLOps / SageMaker Diagrams
+
+#### Diagram 6: MLOps End-to-End on SageMaker
+![MLOps End-to-End](generated-diagrams/06_mlops_sagemaker_e2e.png)
+
+#### Diagram 7: SageMaker Pipelines — CI/CD for ML
+![SageMaker Pipelines](generated-diagrams/07_sagemaker_pipeline.png)
+
+#### Diagram 8: Model Monitoring & Drift Detection
+![Model Monitoring](generated-diagrams/08_model_monitoring_drift.png)
+
+#### Diagram 9: Feature Store & Training Architecture
+![Feature Store & Training](generated-diagrams/09_feature_store_training.png)
 
 ---
 
-## 🏗️ LLMOps on AWS — Services Map
+## 🏗️ Complete AWS Services Map — MLOps + LLMOps
 
-| Category | Service | Role in LLMOps |
-|----------|---------|----------------|
-| **Foundation Models** | Amazon Bedrock | Access Claude, Nova, Llama, Titan |
-| **Custom Hosting** | SageMaker Endpoints | Deploy fine-tuned/custom models |
-| **Agent Runtime** | Bedrock AgentCore | Serverless agent containers |
-| **Prompt Management** | Bedrock Prompt Mgmt | Version, test, deploy prompts |
-| **Guardrails** | Bedrock Guardrails | Content filtering, PII redaction |
-| **Evaluation** | Bedrock Model Eval | Automated quality scoring |
-| **CI/CD** | CodePipeline + CodeBuild | Automate deployments |
-| **Monitoring** | CloudWatch + X-Ray | Latency, errors, cost tracking |
-| **Cost** | Cost Explorer + Budgets | Token spend monitoring |
-| **Security** | IAM + KMS + VPC | Access control, encryption |
-| **Gateway** | API Gateway + WAF | Rate limiting, auth, throttling |
-| **Storage** | S3 + DynamoDB | Prompts, evaluations, logs |
+| Category | Service | MLOps Role | LLMOps Role |
+|----------|---------|-----------|-------------|
+| **Foundation Models** | Amazon Bedrock | — | Access Claude, Nova, Llama, Titan |
+| **Training** | SageMaker Training | Train custom models (GPU) | Fine-tune LLMs |
+| **Pipelines** | SageMaker Pipelines | Automated ML workflows | Prompt eval pipelines |
+| **Feature Store** | SageMaker Feature Store | Centralized features | — |
+| **Model Registry** | SageMaker Model Registry | Version & approve models | Track prompt versions |
+| **Endpoints** | SageMaker Endpoints | Deploy custom models | Host fine-tuned LLMs |
+| **Agent Runtime** | Bedrock AgentCore | — | Serverless agent containers |
+| **Prompt Mgmt** | Bedrock Prompt Mgmt | — | Version, test, deploy prompts |
+| **Guardrails** | Bedrock Guardrails | — | Content filtering, PII redaction |
+| **Evaluation** | Bedrock Model Eval | — | Automated quality scoring |
+| **Model Monitor** | SageMaker Model Monitor | Drift detection (data/model/bias) | — |
+| **CI/CD** | CodePipeline + CodeBuild | ML pipeline automation | Prompt/agent deployment |
+| **Monitoring** | CloudWatch + X-Ray | Endpoint metrics + traces | Latency, tokens, cost |
+| **Cost** | Cost Explorer + Budgets | Instance cost tracking | Token spend monitoring |
+| **Security** | IAM + KMS + VPC | Model access control | API access control |
+| **Gateway** | API Gateway + WAF | — | Rate limiting, auth, throttling |
+| **Storage** | S3 + DynamoDB | Training data + features | Prompts, evals, logs |
+| **Orchestration** | Step Functions + EventBridge | Workflow automation | Agent workflows |
+| **Data Prep** | SageMaker Data Wrangler | Data cleaning + transforms | — |
+| **Labeling** | SageMaker Ground Truth | Label training data | — |
+| **AutoML** | SageMaker Autopilot | Automated model building | — |
 
 ---
 
@@ -968,6 +1023,8 @@ if __name__ == "__main__":
 
 ## 📚 Key Takeaways
 
+### LLMOps Takeaways
+
 | # | Takeaway |
 |---|----------|
 | 1 | **LLMOps ≠ MLOps** — prompts change weekly, models change monthly, evaluation is continuous |
@@ -978,6 +1035,19 @@ if __name__ == "__main__":
 | 6 | **Canary first** — always route 10% traffic to new versions before full rollout |
 | 7 | **Log everything** — you'll need the data for evaluation, debugging, and compliance |
 | 8 | **LLM-as-Judge** — scales evaluation from 10 tests/day to 1000 tests/hour |
+
+### MLOps / SageMaker Takeaways
+
+| # | Takeaway |
+|---|----------|
+| 9 | **SageMaker Pipelines** — automate the full ML lifecycle (data → train → evaluate → deploy) |
+| 10 | **Feature Store** — single source of truth for training (offline) AND inference (online) |
+| 11 | **Model Registry** — version every model artifact, require approval before production |
+| 12 | **Model Monitor** — detect data drift, model quality drop, and bias drift automatically |
+| 13 | **Auto-retrain** — EventBridge + drift alarms = pipeline triggers itself when quality drops |
+| 14 | **Data Capture** — capture 100% of endpoint inputs/outputs for monitoring baselines |
+| 15 | **Auto-scaling** — scale endpoints on invocations-per-instance, not CPU |
+| 16 | **MLOps Level 3** — target fully automated: drift detection → retrain → deploy → validate |
 
 ---
 
@@ -1076,20 +1146,6 @@ if __name__ == "__main__":
 ```
 
 ---
-
-### Architecture Diagrams — MLOps
-
-### Diagram 6: MLOps End-to-End on SageMaker
-![MLOps End-to-End](generated-diagrams/06_mlops_sagemaker_e2e.png)
-
-### Diagram 7: SageMaker Pipelines — CI/CD for ML
-![SageMaker Pipelines](generated-diagrams/07_sagemaker_pipeline.png)
-
-### Diagram 8: Model Monitoring & Drift Detection
-![Model Monitoring](generated-diagrams/08_model_monitoring_drift.png)
-
-### Diagram 9: Feature Store & Training Architecture
-![Feature Store & Training](generated-diagrams/09_feature_store_training.png)
 
 ---
 
